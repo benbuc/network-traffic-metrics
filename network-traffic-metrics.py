@@ -13,6 +13,7 @@ services = set() # Names of all services
 # Given an IP or FQDN, extract the domain name to be used as server/client.
 def extract_domain(string):
     if opts.fqdn: return string
+    if string.endswith('fritz.box'): return string
     parts = string.split('.')
     l = len(parts)
     if l == 4 and all(p.isnumeric() for p in parts): return string # IP Address
@@ -45,9 +46,17 @@ def parse_packet(line):
         print('[SKIP] ' + line.replace("\n", "\t"))
         return
 
+    src = m.group('src')
+    if not src.startswith('192.168.10.') and not src.endswith('fritz.box'):
+        src = "0.0.0.0"
+
+    dst = m.group('dst')
+    if not dst.startswith('192.168.10.') and not dst.endswith('fritz.box'):
+        dst = "0.0.0.0"
+
     labels = {
-        'src': extract_domain(m.group('src')),
-        'dst': extract_domain(m.group('dst')),
+        'src': extract_domain(src),
+        'dst': extract_domain(dst),
         'proto': m.group('proto').lower(),
         'service': None
     }
@@ -60,7 +69,7 @@ def parse_packet(line):
     if not labels['service'] and m.group('srcp').isnumeric():
         labels['service'] = lookup_service(int(m.group('srcp')), labels['proto'])
     if not labels['service']:
-        labels['service'] = ""
+        labels['service'] = "UNKNOWN"
 
     packets.labels(**labels).inc()
     throughput.labels(**labels).inc(int(m.group('length')))
@@ -69,7 +78,7 @@ def parse_packet(line):
 async def stream_packets():
     p = await asyncio.create_subprocess_exec(
         'tcpdump', '-i', opts.interface, '-v', '-l', opts.filters,
-        stdout=asyncio.subprocess.PIPE)
+        stdout=asyncio.subprocess.PIPE) # include -n to only show IPs
     while True:
         # When tcpdump is run with -v, it outputs two lines per packet;
         # readuntil ensures that each "line" is actually a parse-able string of output.
